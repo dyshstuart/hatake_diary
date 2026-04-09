@@ -517,6 +517,18 @@ img { max-width: 100%; display: block; }
 
 .btn-danger-sm:active { background: #FECACA; }
 
+.btn-edit-sm {
+  padding: 6px 14px;
+  background: #EBF2E2;
+  color: var(--primary-dk);
+  border-radius: var(--radius-sm);
+  font-size: .8rem;
+  font-weight: 600;
+  min-height: 32px;
+}
+
+.btn-edit-sm:active { background: #D4E8C4; }
+
 /* ── Forms ───────────────────────────────────────────────────── */
 .form-card {
   background: var(--bg-card);
@@ -746,13 +758,18 @@ img { max-width: 100%; display: block; }
 /* ── Record Detail / Diary ─────────────────────────────────────── */
 .detail-header { padding-bottom: 8px; }
 
+.detail-header-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .diary-card {
   background: var(--bg-card);
   border-radius: var(--radius);
   padding: 20px 18px;
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border);
-  font-family: var(--font-diary);
   position: relative;
   overflow: hidden;
 }

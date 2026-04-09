@@ -27,6 +27,7 @@ const state = {
   page:           'home',
   cropFilter:     null,
   detailId:       null,
+  editingId:      null,
   pendingPhotos:  [],
   calendarCropId: null,
 };
@@ -52,6 +53,7 @@ async function navigate(page, params = {}) {
   if ('cropFilter'     in params) state.cropFilter     = params.cropFilter;
   if ('detailId'       in params) state.detailId       = params.detailId;
   if ('calendarCropId' in params) state.calendarCropId = params.calendarCropId;
+  state.editingId     = params.editingId ?? null;
   state.pendingPhotos = [];
 
   await renderPage();
@@ -259,54 +261,59 @@ async function clearFilter() {
 // ── Crop Form ─────────────────────────────────────────────────────────────────
 
 async function buildCropForm() {
-  const periodOpts = `<option value="">未定</option>` + PERIODS.map(p => `<option>${p}</option>`).join('');
+  const ex = state.editingId ? await DB.crops.get(state.editingId) : null;
+  const isEdit = !!ex;
+
+  const periodOpts = sel => `<option value="">未定</option>` +
+    PERIODS.map(p => `<option${p === sel ? ' selected' : ''}>${p}</option>`).join('');
+
+  const statusOpts = CROP_STATUS.map(s =>
+    `<option${s === (ex?.status || CROP_STATUS[0]) ? ' selected' : ''}>${s}</option>`).join('');
+  const expOpts = CROP_EXPERIENCE.map(e =>
+    `<option${e === (ex?.experience || CROP_EXPERIENCE[0]) ? ' selected' : ''}>${e}</option>`).join('');
 
   return `
     <div class="page-header">
-      <h1 class="page-title">🌿 作物登録</h1>
+      <h1 class="page-title">${isEdit ? '🌿 作物を編集' : '🌿 作物登録'}</h1>
     </div>
 
     <form id="crop-form" class="form-card" onsubmit="saveCrop(event)">
       <div class="form-group">
         <label class="form-label">作物名 <span class="required">*</span></label>
-        <input type="text" id="c-name" class="form-input" placeholder="例：トマト、ナス、キュウリ" required>
+        <input type="text" id="c-name" class="form-input" placeholder="例：トマト、ナス、キュウリ"
+               value="${esc(ex?.name || '')}" required>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">植付け時期</label>
-          <select id="c-plant" class="form-select">${periodOpts}</select>
+          <select id="c-plant" class="form-select">${periodOpts(ex?.plantingPeriod)}</select>
         </div>
         <div class="form-group">
           <label class="form-label">収穫時期</label>
-          <select id="c-harvest" class="form-select">${periodOpts}</select>
+          <select id="c-harvest" class="form-select">${periodOpts(ex?.harvestPeriod)}</select>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">状態</label>
-          <select id="c-status" class="form-select">
-            ${CROP_STATUS.map(s => `<option>${s}</option>`).join('')}
-          </select>
+          <select id="c-status" class="form-select">${statusOpts}</select>
         </div>
         <div class="form-group">
           <label class="form-label">育成経験</label>
-          <select id="c-exp" class="form-select">
-            ${CROP_EXPERIENCE.map(e => `<option>${e}</option>`).join('')}
-          </select>
+          <select id="c-exp" class="form-select">${expOpts}</select>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">備考</label>
-        <textarea id="c-notes" class="form-textarea" rows="3" placeholder="メモ・特記事項など"></textarea>
+        <textarea id="c-notes" class="form-textarea" rows="3" placeholder="メモ・特記事項など">${esc(ex?.notes || '')}</textarea>
       </div>
       <div class="form-actions">
-        <button type="submit" class="btn-primary">登録する</button>
-        <button type="button" class="btn-ghost" onclick="navigate('home')">キャンセル</button>
+        <button type="submit" class="btn-primary">${isEdit ? '更新する' : '登録する'}</button>
+        <button type="button" class="btn-ghost" onclick="navigate('cropForm')">キャンセル</button>
       </div>
     </form>
 
-    <div class="section-title">登録済みの作物</div>
-    <div id="crops-list" class="list-container"></div>
+    ${!isEdit ? `<div class="section-title">登録済みの作物</div><div id="crops-list" class="list-container"></div>` : ''}
   `;
 }
 
@@ -333,6 +340,7 @@ async function initCropForm() {
       </div>
       ${c.notes ? `<div class="crop-notes">${esc(c.notes)}</div>` : ''}
       <div class="card-actions">
+        <button class="btn-edit-sm" onclick="navigate('cropForm', {editingId: ${c.id}})">編集</button>
         <button class="btn-danger-sm" onclick="deleteCrop(${c.id}, event)">削除</button>
       </div>
     </div>
@@ -344,19 +352,27 @@ async function saveCrop(e) {
   const name = document.getElementById('c-name').value.trim();
   if (!name) return;
 
-  await DB.crops.add({
+  const data = {
     name,
     plantingPeriod: document.getElementById('c-plant').value   || null,
     harvestPeriod:  document.getElementById('c-harvest').value || null,
     status:         document.getElementById('c-status').value,
     experience:     document.getElementById('c-exp').value,
     notes:          document.getElementById('c-notes').value.trim(),
-  });
+  };
 
-  showToast('作物を登録しました 🌱');
-  document.getElementById('crop-form').reset();
-  await initCropForm();
-  await renderSidebar();
+  if (state.editingId) {
+    const existing = await DB.crops.get(state.editingId);
+    await DB.crops.put({ ...existing, ...data });
+    showToast('作物を更新しました 🌿');
+    await navigate('cropForm');
+  } else {
+    await DB.crops.add(data);
+    showToast('作物を登録しました 🌱');
+    document.getElementById('crop-form').reset();
+    await initCropForm();
+    await renderSidebar();
+  }
 }
 
 async function deleteCrop(id, e) {
@@ -371,7 +387,14 @@ async function deleteCrop(id, e) {
 // ── Record Form ───────────────────────────────────────────────────────────────
 
 async function buildRecordForm() {
+  const ex = state.editingId ? await DB.records.get(state.editingId) : null;
+  const isEdit = !!ex;
   const [records, crops] = await Promise.all([DB.records.getAll(), DB.crops.getAll()]);
+
+  // Pre-load photos for edit
+  if (isEdit && ex.photos) {
+    state.pendingPhotos = ex.photos.map(p => ({ full: p.full, thumb: p.thumb }));
+  }
 
   const lastUsed = {};
   records.forEach(r => {
@@ -379,24 +402,24 @@ async function buildRecordForm() {
   });
   const sorted = [...crops].sort((a, b) => (lastUsed[b.id] || '').localeCompare(lastUsed[a.id] || ''));
 
-  const today = new Date().toISOString().slice(0, 10);
+  const dateVal = ex?.date || new Date().toISOString().slice(0, 10);
 
   return `
     <div class="page-header">
-      <h1 class="page-title">📝 記録登録</h1>
+      <h1 class="page-title">${isEdit ? '📝 記録を編集' : '📝 記録登録'}</h1>
     </div>
 
     <form id="record-form" class="form-card" onsubmit="saveRecord(event)">
       <div class="form-row">
         <div class="form-group flex1">
           <label class="form-label">日時 <span class="required">*</span></label>
-          <input type="date" id="r-date" class="form-input" value="${today}" required>
+          <input type="date" id="r-date" class="form-input" value="${dateVal}" required>
         </div>
         <div class="form-group flex2">
           <label class="form-label">作物</label>
           <select id="r-crop" class="form-select">
             <option value="">未選択</option>
-            ${sorted.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+            ${sorted.map(c => `<option value="${c.id}"${c.id === ex?.cropId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -406,7 +429,7 @@ async function buildRecordForm() {
         <div class="checkbox-group">
           ${WORK_TYPES.map(w => `
             <label class="checkbox-item">
-              <input type="checkbox" name="work" value="${esc(w)}">
+              <input type="checkbox" name="work" value="${esc(w)}"${(ex?.workTypes || []).includes(w) ? ' checked' : ''}>
               <span class="checkbox-chip" style="--chip-color:${WORK_COLORS[w]}">${esc(w)}</span>
             </label>
           `).join('')}
@@ -415,14 +438,15 @@ async function buildRecordForm() {
 
       <div class="form-group">
         <label class="form-label">タイトル</label>
-        <input type="text" id="r-title" class="form-input" placeholder="例：初めての追肥">
+        <input type="text" id="r-title" class="form-input" placeholder="例：初めての追肥"
+               value="${esc(ex?.title || '')}">
       </div>
 
       <div class="form-group">
         <label class="form-label">本文</label>
         <textarea id="r-body" class="form-textarea" rows="5"
-          placeholder="作業の内容・気づいたことなど（500文字程度）" maxlength="1000"></textarea>
-        <div class="char-count"><span id="body-count">0</span> / 1000</div>
+          placeholder="作業の内容・気づいたことなど（500文字程度）" maxlength="1000">${esc(ex?.body || '')}</textarea>
+        <div class="char-count"><span id="body-count">${(ex?.body || '').length}</span> / 1000</div>
       </div>
 
       <div class="form-group">
@@ -436,8 +460,8 @@ async function buildRecordForm() {
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="btn-primary">記録する</button>
-        <button type="button" class="btn-ghost" onclick="navigate('home')">キャンセル</button>
+        <button type="submit" class="btn-primary">${isEdit ? '更新する' : '記録する'}</button>
+        <button type="button" class="btn-ghost" onclick="${isEdit ? `navigate('recordDetail', {detailId: ${ex.id}})` : `navigate('home')`}">キャンセル</button>
       </div>
     </form>
   `;
@@ -449,6 +473,8 @@ function initRecordForm() {
   if (body && count) {
     body.addEventListener('input', () => { count.textContent = body.value.length; });
   }
+  // Render pre-loaded photos for edit mode
+  renderPhotoPreview();
 }
 
 async function addPhotos(input) {
@@ -493,7 +519,7 @@ async function saveRecord(e) {
   const workTypes = Array.from(document.querySelectorAll('input[name="work"]:checked')).map(el => el.value);
   const crop     = cropId ? await DB.crops.get(cropId) : null;
 
-  await DB.records.add({
+  const payload = {
     date,
     cropId,
     cropName: crop ? crop.name : '',
@@ -501,23 +527,37 @@ async function saveRecord(e) {
     title:  document.getElementById('r-title').value.trim(),
     body:   document.getElementById('r-body').value.trim(),
     photos: state.pendingPhotos.map(p => ({ full: p.full, thumb: p.thumb })),
-  });
+  };
 
-  state.pendingPhotos = [];
-  showToast('記録を保存しました 📝');
-  await navigate('home');
+  if (state.editingId) {
+    const existing = await DB.records.get(state.editingId);
+    await DB.records.put({ ...existing, ...payload });
+    state.pendingPhotos = [];
+    showToast('記録を更新しました 📝');
+    await navigate('recordDetail', { detailId: state.editingId });
+  } else {
+    await DB.records.add(payload);
+    state.pendingPhotos = [];
+    showToast('記録を保存しました 📝');
+    await navigate('home');
+  }
 }
 
 // ── Planned Work Form ─────────────────────────────────────────────────────────
 
 async function buildPlannedForm() {
+  const ex = state.editingId ? await DB.planned.get(state.editingId) : null;
+  const isEdit = !!ex;
   const crops = await DB.crops.getAll();
+
   const periodOpts = `<option value="">選択してください</option>` +
-    PERIODS.map(p => `<option>${p}</option>`).join('');
+    PERIODS.map(p => `<option${p === ex?.period ? ' selected' : ''}>${p}</option>`).join('');
+  const workOpts = `<option value="">選択してください</option>` +
+    WORK_TYPES.map(w => `<option${w === ex?.workType ? ' selected' : ''}>${esc(w)}</option>`).join('');
 
   return `
     <div class="page-header">
-      <h1 class="page-title">📅 予定作業登録</h1>
+      <h1 class="page-title">${isEdit ? '📅 予定作業を編集' : '📅 予定作業登録'}</h1>
     </div>
 
     <form id="planned-form" class="form-card" onsubmit="savePlanned(event)">
@@ -525,7 +565,7 @@ async function buildPlannedForm() {
         <label class="form-label">作物 <span class="required">*</span></label>
         <select id="p-crop" class="form-select" required>
           <option value="">選択してください</option>
-          ${crops.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+          ${crops.map(c => `<option value="${c.id}"${c.id === ex?.cropId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
         </select>
         ${crops.length === 0 ? '<p class="form-hint">先に作物を登録してください</p>' : ''}
       </div>
@@ -536,24 +576,20 @@ async function buildPlannedForm() {
         </div>
         <div class="form-group">
           <label class="form-label">作業種類 <span class="required">*</span></label>
-          <select id="p-work" class="form-select" required>
-            <option value="">選択してください</option>
-            ${WORK_TYPES.map(w => `<option>${esc(w)}</option>`).join('')}
-          </select>
+          <select id="p-work" class="form-select" required>${workOpts}</select>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">備考</label>
-        <textarea id="p-notes" class="form-textarea" rows="3" placeholder="メモなど"></textarea>
+        <textarea id="p-notes" class="form-textarea" rows="3" placeholder="メモなど">${esc(ex?.notes || '')}</textarea>
       </div>
       <div class="form-actions">
-        <button type="submit" class="btn-primary">登録する</button>
-        <button type="button" class="btn-ghost" onclick="navigate('home')">キャンセル</button>
+        <button type="submit" class="btn-primary">${isEdit ? '更新する' : '登録する'}</button>
+        <button type="button" class="btn-ghost" onclick="navigate('plannedForm')">キャンセル</button>
       </div>
     </form>
 
-    <div class="section-title">登録済みの予定作業</div>
-    <div id="planned-list" class="list-container"></div>
+    ${!isEdit ? `<div class="section-title">登録済みの予定作業</div><div id="planned-list" class="list-container"></div>` : ''}
   `;
 }
 
@@ -578,6 +614,7 @@ async function initPlannedForm() {
       <div class="planned-crop-name">${esc(cropMap[p.cropId]?.name || '不明')}</div>
       ${p.notes ? `<div class="planned-notes">${esc(p.notes)}</div>` : ''}
       <div class="card-actions">
+        <button class="btn-edit-sm" onclick="navigate('plannedForm', {editingId: ${p.id}})">編集</button>
         <button class="btn-danger-sm" onclick="deletePlanned(${p.id}, event)">削除</button>
       </div>
     </div>
@@ -592,17 +629,25 @@ async function savePlanned(e) {
   if (!cropId || !period || !workType) return;
 
   const crop = await DB.crops.get(cropId);
-  await DB.planned.add({
+  const payload = {
     cropId,
     cropName: crop ? crop.name : '',
     period,
     workType,
     notes: document.getElementById('p-notes').value.trim(),
-  });
+  };
 
-  showToast('予定作業を登録しました 📅');
-  document.getElementById('planned-form').reset();
-  await initPlannedForm();
+  if (state.editingId) {
+    const existing = await DB.planned.get(state.editingId);
+    await DB.planned.put({ ...existing, ...payload });
+    showToast('予定作業を更新しました 📅');
+    await navigate('plannedForm');
+  } else {
+    await DB.planned.add(payload);
+    showToast('予定作業を登録しました 📅');
+    document.getElementById('planned-form').reset();
+    await initPlannedForm();
+  }
 }
 
 async function deletePlanned(id, e) {
@@ -634,7 +679,10 @@ async function buildRecordDetail() {
         </svg>
         一覧へ
       </button>
-      <button class="btn-danger-sm" onclick="deleteRecord(${r.id})">削除</button>
+      <div class="detail-header-actions">
+        <button class="btn-edit-sm" onclick="navigate('recordForm', {editingId: ${r.id}})">編集</button>
+        <button class="btn-danger-sm" onclick="deleteRecord(${r.id})">削除</button>
+      </div>
     </div>
 
     <div class="diary-card">
